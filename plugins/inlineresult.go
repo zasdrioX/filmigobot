@@ -33,18 +33,26 @@ func InlineResultHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 		id     = args[1]
 	)
 
-	media, buttons, err := getChosenResult(method, id)
+	posterURL, caption, buttons, err := getChosenResult(method, id)
 	if err != nil {
-		// Must do something here
 		fmt.Println(err)
 		return nil
 	}
 
-	_, _, err = bot.EditMessageMedia(
-		media,
-		&gotgbot.EditMessageMediaOpts{
+	messageText := fmt.Sprintf("<a href=\"%s\">&#8203;</a>%s", posterURL, caption)
+
+	// --- FIX: Change from EditMessageMedia to EditMessageText ---
+	_, _, err = bot.EditMessageText(
+		messageText,
+		&gotgbot.EditMessageTextOpts{
 			InlineMessageId: update.InlineMessageId,
+			ParseMode:       gotgbot.ParseModeHTML,
 			ReplyMarkup:     gotgbot.InlineKeyboardMarkup{InlineKeyboard: buttons},
+			LinkPreviewOptions: &gotgbot.LinkPreviewOptions{
+				IsDisabled:      false,
+				ShowAboveText: true, // <-- THIS IS THE FIX
+				Url:             posterURL,
+			},
 		},
 	)
 	if err != nil {
@@ -54,26 +62,24 @@ func InlineResultHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return nil
 }
 
-// Returns the inputmessage content to edit with.
-func getChosenResult(method, id string) (gotgbot.InputMediaPhoto, [][]gotgbot.InlineKeyboardButton, error) {
+// Returns the content to edit with.
+func getChosenResult(method, id string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
 	switch method {
-	case searchMethodJW:
-		return GetJWTitle(id)
+	// case searchMethodJW:
+	// 	return GetJWTitle(id)
 	case searchMethodIMDb:
 		return GetIMDbTitle(id)
 	case searchMethodOMDb:
 		return GetOMDbTitle(id)
 	default:
 		fmt.Println("unknown method on choseninlineresult : " + method)
-		return GetJWTitle(id)
+		return GetOMDbTitle(id)
 	}
 }
 
 // CbOpen handles callbacks from open_ buttons in search results.
 func CbOpen(bot *gotgbot.Bot, ctx *ext.Context) error {
 	update := ctx.CallbackQuery
-
-	// callback data structure: open_<method>_<id>
 
 	split := strings.Split(update.Data, "_")
 	if len(split) < 3 {
@@ -84,22 +90,23 @@ func CbOpen(bot *gotgbot.Bot, ctx *ext.Context) error {
 	var (
 		method = split[1]
 		id     = split[2]
-
-		photo   gotgbot.InputMediaPhoto
-		buttons [][]gotgbot.InlineKeyboardButton
-		err     error
+		
+		posterURL string
+		caption   string
+		buttons   [][]gotgbot.InlineKeyboardButton
+		err       error
 	)
 
 	switch method {
-	case searchMethodJW:
-		photo, buttons, err = GetJWTitle(id)
+	// case searchMethodJW:
+	// 	photo, buttons, err = GetJWTitle(id)
 	case searchMethodIMDb:
-		photo, buttons, err = GetIMDbTitle(id)
+		posterURL, caption, buttons, err = GetIMDbTitle(id)
 	case searchMethodOMDb:
-		photo, buttons, err = GetOMDbTitle(id)
+		posterURL, caption, buttons, err = GetOMDbTitle(id)
 	default:
 		fmt.Println("unknown method on cbopen: " + method)
-		photo, buttons, err = GetJWTitle(id)
+		posterURL, caption, buttons, err = GetOMDbTitle(id)
 	}
 
 	if err != nil {
@@ -108,7 +115,18 @@ func CbOpen(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	_, _, err = update.Message.EditMedia(bot, photo, &gotgbot.EditMessageMediaOpts{ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: buttons}})
+	messageText := fmt.Sprintf("<a href=\"%s\">&#8203;</a>%s", posterURL, caption)
+
+	// --- FIX: Change from EditMedia to EditMessageText ---
+	_, _, err = update.Message.EditText(bot, messageText, &gotgbot.EditMessageTextOpts{
+		ParseMode:   gotgbot.ParseModeHTML,
+		ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: buttons},
+		LinkPreviewOptions: &gotgbot.LinkPreviewOptions{
+			IsDisabled:      false,
+			ShowAboveText: true, // <-- THIS IS THE FIX
+			Url:             posterURL,
+		},
+	})
 	if err != nil {
 		fmt.Printf("cbopen: %v", err)
 	}
