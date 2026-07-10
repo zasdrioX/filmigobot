@@ -464,6 +464,41 @@ type omdbFillData struct {
 // ==========================================
 
 func SearchOMDb(query string) ([]UniversalSearchResult, error) {
+	// --- NEW CODE: EXTRACT ID FROM URL ---
+	if strings.Contains(query, "imdb.com/title/tt") || (strings.HasPrefix(query, "tt") && len(query) >= 7) {
+		start := strings.Index(query, "tt")
+		idPart := query[start:]
+		end := strings.IndexAny(idPart, "/? \n\t")
+		if end == -1 {
+			end = len(idPart)
+		}
+		imdbID := idPart[:end]
+
+		apiURL := fmt.Sprintf("%s/titles/%s", apiFallback, imdbID)
+		if resp, err := http.Get(apiURL); err == nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			var directData struct {
+				ID           string `json:"id"`
+				PrimaryTitle string `json:"primaryTitle"`
+				StartYear    int    `json:"startYear"`
+				PrimaryImage *struct{ URL string `json:"url"` } `json:"primaryImage"`
+				Type         string `json:"type"`
+				Rating       *struct{ AggregateRating float64 `json:"aggregateRating"` } `json:"rating"`
+			}
+			if json.Unmarshal(body, &directData) == nil && directData.ID != "" {
+				poster := ""
+				if directData.PrimaryImage != nil { poster = directData.PrimaryImage.URL }
+				typeTag := ""
+				if directData.Type != "" { typeTag = strings.Title(directData.Type) }
+				rating := 0.0
+				if directData.Rating != nil { rating = directData.Rating.AggregateRating }
+				return []UniversalSearchResult{{ID: directData.ID, Title: directData.PrimaryTitle, Year: directData.StartYear, Poster: poster, Type: typeTag, Rating: rating}}, nil
+			}
+		}
+	}
+	// --- END OF NEW CODE ---
+
 	// EXCLUSIVE INLINE SEARCH: imdbapi.dev
 	apiURL := fmt.Sprintf("%s/search/titles?query=%s", apiFallback, url.QueryEscape(query))
 	if resp, err := http.Get(apiURL); err == nil {
