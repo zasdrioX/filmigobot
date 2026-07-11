@@ -347,7 +347,7 @@ type primaryDetailData struct {
 // 3. NEW BALLOONERISM API IMPLEMENTATION
 // ==========================================
 type bRes struct { Results []struct { MediaType string `json:"media_type"`; ID string `json:"id"`; Title string `json:"title"`; Name string `json:"name"`; ReleaseDate string `json:"release_date"`; FirstAirDate string `json:"first_air_date"`; PosterPath string `json:"poster_path"`; VoteAverage float64 `json:"vote_average"` } `json:"results"` }
-type bTrailer struct { Playback map[string]string `json:"playback"` }
+type bTrailer struct { Playback map[string]string `json:"playback"`; URL string `json:"url"` }
 type bMovie struct { ID string `json:"id"`; Title string `json:"title"`; OriginalTitle string `json:"original_title"`; Overview string `json:"overview"`; Tagline string `json:"tagline"`; ReleaseDate string `json:"release_date"`; Runtime int `json:"runtime"`; VoteAverage float64 `json:"vote_average"`; VoteCount int `json:"vote_count"`; Genres []struct{ Name string `json:"name"` } `json:"genres"`; PosterPath string `json:"poster_path"`; SpokenLanguages []struct{ Name string `json:"name"` } `json:"spoken_languages"`; ProductionCountries []struct{ Iso3166_1 string `json:"iso_3166_1"`; Name string `json:"name"` } `json:"production_countries"`; Trailer *bTrailer `json:"trailer"` }
 type bTV struct { ID string `json:"id"`; Name string `json:"name"`; OriginalName string `json:"original_name"`; Overview string `json:"overview"`; FirstAirDate string `json:"first_air_date"`; LastAirDate string `json:"last_air_date"`; NumberOfEpisodes int `json:"number_of_episodes"`; NumberOfSeasons int `json:"number_of_seasons"`; EpisodeRunTime []int `json:"episode_run_time"`; VoteAverage float64 `json:"vote_average"`; VoteCount int `json:"vote_count"`; Genres []struct{ Name string `json:"name"` } `json:"genres"`; PosterPath string `json:"poster_path"`; SpokenLanguages []struct{ Name string `json:"name"` } `json:"spoken_languages"`; ProductionCountries []struct{ Iso3166_1 string `json:"iso_3166_1"`; Name string `json:"name"` } `json:"production_countries"`; OriginCountry []string `json:"origin_country"`; Trailer *bTrailer `json:"trailer"` }
 type bCredits struct { Cast []struct{ ID string `json:"id"`; Name string `json:"name"`; Character string `json:"character"` } `json:"cast"`; Crew []struct{ ID string `json:"id"`; Name string `json:"name"`; Job string `json:"job"`; Department string `json:"department"` } `json:"crew"` }
@@ -628,135 +628,6 @@ func getDetailsPrimary(id string) (string, string, [][]gotgbot.InlineKeyboardBut
 	return poster, sb.String(), buttons, nil
 }
 
-func getDetailsFallback(id string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
-	var buttons [][]gotgbot.InlineKeyboardButton
-	mDetail, tDetail, err := fetchBalloon(id)
-	if err != nil { return "", "", buttons, err }
-
-	isSeries := (tDetail != nil)
-	endpoint := "movie"; if isSeries { endpoint = "tv" }
-
-	var creds bCredits; var akas bAkas; var kwds bKeywords; var omdbFill omdbFillData; var wg sync.WaitGroup
-	wg.Add(4)
-	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/credits", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&creds); r.Body.Close() } }()
-	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/alternative_titles", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&akas); r.Body.Close() } }()
-	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/keywords", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&kwds); r.Body.Close() } }()
-	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("https://www.omdbapi.com/?i=%s&apikey=%s", id, OmdbApiKey)); e == nil { json.NewDecoder(r.Body).Decode(&omdbFill); r.Body.Close() } }()
-	wg.Wait()
-
-	var sb strings.Builder
-	var title, origTitle, dateStr, overview, poster, tagline string
-	var year, lastYear, runtime, seasons, episodes int
-	var vote float64; var vCount int; var typeStr = "Movie"
-	var dirs, writers, prods, stars, cast, genres []string
-	var trailer *bTrailer
-
-	if isSeries {
-		title = tDetail.Name; origTitle = tDetail.OriginalName; dateStr = tDetail.FirstAirDate; year = parseYear(dateStr); lastYear = parseYear(tDetail.LastAirDate); overview = tDetail.Overview; poster = tDetail.PosterPath; if len(tDetail.EpisodeRunTime) > 0 { runtime = tDetail.EpisodeRunTime[0] }
-		vote = tDetail.VoteAverage; vCount = tDetail.VoteCount; seasons = tDetail.NumberOfSeasons; episodes = tDetail.NumberOfEpisodes; typeStr = "TV Series"; trailer = tDetail.Trailer
-		for _, g := range tDetail.Genres { genres = append(genres, "#"+strings.ReplaceAll(g.Name, " ", "_")) }
-	} else {
-		title = mDetail.Title; origTitle = mDetail.OriginalTitle; dateStr = mDetail.ReleaseDate; year = parseYear(dateStr); overview = mDetail.Overview; poster = mDetail.PosterPath; tagline = mDetail.Tagline; runtime = mDetail.Runtime
-		vote = mDetail.VoteAverage; vCount = mDetail.VoteCount; trailer = mDetail.Trailer
-		for _, g := range mDetail.Genres { genres = append(genres, "#"+strings.ReplaceAll(g.Name, " ", "_")) }
-	}
-
-	yearStr := ""
-	if isSeries {
-		if lastYear > year { yearStr = fmt.Sprintf("[%d-%d]", year, lastYear) } else if lastYear == 0 && year > 0 { yearStr = fmt.Sprintf("[%d-Present]", year) } else if year > 0 { yearStr = fmt.Sprintf("[%d]", year) }
-	} else if year > 0 { yearStr = fmt.Sprintf("[%d]", year) }
-
-	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"https://imdb.com/title/%s\">IMDb Link</a>\n", typeStr, title, yearStr, id))
-	if origTitle != "" && origTitle != title { sb.WriteString(fmt.Sprintf("<i>(Original Title: %s)</i>\n", origTitle)) }
-
-	akaStr := ""
-	if len(akas.Titles) > 0 {
-		for _, a := range akas.Titles { if (a.Iso3166_1 == "US" || a.Iso3166_1 == "IN") && a.Title != title { akaStr = a.Title; break } }
-		if akaStr == "" && akas.Titles[0].Title != title { akaStr = akas.Titles[0].Title }
-	}
-	if akaStr != "" { sb.WriteString(fmt.Sprintf("<i>(AKA %s)</i>\n", akaStr)) }
-
-	if isSeries && seasons > 0 { sb.WriteString(fmt.Sprintf("<b>%d Seasons (%d Episodes)</b>\n", seasons, episodes)) } else if isSeries && omdbFill.TotalSeasons != "" && omdbFill.TotalSeasons != notAvailable { sb.WriteString(fmt.Sprintf("<b>%s Seasons</b>\n", omdbFill.TotalSeasons)) }
-	
-	if runtime > 0 { dur := fmt.Sprintf("%dh %dm", runtime/60, runtime%60); if isSeries { dur += "/Episode" }; sb.WriteString(fmt.Sprintf("<i>Duration: </i>%s\n", dur)) }
-	
-	if dateStr != "" { 
-		if p, err := time.Parse("2006-01-02", dateStr); err == nil { dateStr = p.Format("02 January 2006") }
-		flag := ""
-		if isSeries && len(tDetail.OriginCountry) > 0 { flag = getFlag(tDetail.OriginCountry[0]) } else if !isSeries && len(mDetail.ProductionCountries) > 0 { flag = getFlag(mDetail.ProductionCountries[0].Iso3166_1) } else if omdbFill.Country != "" && omdbFill.Country != notAvailable { flag = getFlag(omdbFill.Country) }
-		if flag != "" { dateStr += fmt.Sprintf(" (%s)", flag) }
-		if isSeries { dateStr += " - First Episode" }
-		sb.WriteString(fmt.Sprintf("<i>Release Date: </i>%s\n", dateStr)) 
-	}
-	
-	if vote > 0 { sb.WriteString(fmt.Sprintf("<i>Rating ⭐️ </i><b>%.1f / 10</b> (from %d votes)\n", vote, vCount)) }
-
-	if len(genres) > 0 { sb.WriteString(fmt.Sprintf("<i>Genres: </i>%s\n", strings.Join(genres, " - "))) }
-	
-	var themes []string
-	for i, k := range kwds.Keywords {
-		if i >= 6 { break }
-		themes = append(themes, "#" + strings.ReplaceAll(strings.Title(k.Name), " ", "_"))
-	}
-	if len(themes) > 0 { sb.WriteString(fmt.Sprintf("<i>Themes: </i>%s\n", strings.Join(themes, " "))) }
-
-	var lgs, cgs []string
-	if isSeries {
-		for _, l := range tDetail.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
-		for _, c := range tDetail.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
-		if len(cgs) == 0 { for _, c := range tDetail.OriginCountry { f := getFlag(c); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, c)) } }
-	} else {
-		for _, l := range mDetail.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
-		for _, c := range mDetail.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
-	}
-	if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
-
-	sb.WriteString("\n")
-
-	if tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", tagline)) }
-	if overview != "" { sb.WriteString(fmt.Sprintf("<blockquote><b>Story Line: </b><i>%s</i></blockquote>\n\n", overview)) }
-
-	for _, c := range creds.Crew {
-		if c.Job == "Director" || (isSeries && (c.Job == "Executive Producer" || c.Job == "Creator")) { if len(dirs) < 3 { dirs = append(dirs, link(c.Name, c.ID)) } }
-		if c.Department == "Writing" || c.Job == "Writer" || c.Job == "Screenplay" { if len(writers) < 3 { writers = append(writers, link(c.Name, c.ID)) } }
-		if c.Job == "Producer" { if len(prods) < 3 { prods = append(prods, link(c.Name, c.ID)) } }
-	}
-	for i, c := range creds.Cast {
-		if i < 4 { stars = append(stars, link(c.Name, c.ID)) }
-		if i >= 4 && i < 15 { cast = append(cast, link(c.Name, c.ID)) }
-	}
-
-	sb.WriteString("<blockquote>")
-	if len(dirs) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Directors:</b></i> %s\n", strings.Join(dirs, ", "))) }
-	if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", strings.Join(writers, ", "))) }
-	if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
-	if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
-	if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
-	sb.WriteString("</blockquote>\n\n")
-
-	sb.WriteString(fmt.Sprintf("<blockquote><b>OTT Info: </b><a href=\"https://www.justwatch.com/in/search?q=%s\">Find on JustWatch</a></blockquote>", url.QueryEscape(title)))
-	sb.WriteString(fmt.Sprintf("\n\n<a href=\"https://imdb.com/title/%s\">Read More...</a> | <a href=\"https://www.youtube.com/results?search_query=%s\">Trailer</a>", id, url.QueryEscape(title+" trailer")))
-
-	vidURL := ""
-	if trailer != nil && trailer.Playback != nil {
-		for _, q := range []string{"1080p", "720p", "AUTO", "480p", "SD", "240p"} {
-			if v, ok := trailer.Playback[q]; ok && v != "" { vidURL = v; break }
-		}
-	}
-	
-	pURL := omdbBanner
-	if vidURL != "" {
-		pURL = vidURL 
-	} else if poster != "" {
-		pURL = "https://image.tmdb.org/t/p/original" + poster
-	}
-	
-	posterURL := omdbBanner
-	if poster != "" { posterURL = "https://image.tmdb.org/t/p/original" + poster }
-	sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Download Poster</a>", posterURL))
-
-	return pURL, sb.String(), buttons, nil
-}
 
 func getFlag(country string) string {
     flagMap := map[string]string{
@@ -785,4 +656,173 @@ func link(name string, id any) string {
 	if idStr, ok := id.(string); ok { return fmt.Sprintf("<a href=\"https://imdb.com/name/%s\">%s</a>", idStr, name) }
 	if idInt, ok := id.(int); ok { return fmt.Sprintf("<a href=\"https://www.themoviedb.org/person/%d\">%s</a>", idInt, name) }
 	return name
+}
+func getDetailsFallback(id string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
+	var buttons [][]gotgbot.InlineKeyboardButton
+	mDetail, tDetail, err := fetchBalloon(id)
+	if err != nil { return "", "", buttons, err }
+
+	isSeries := (tDetail != nil)
+	endpoint := "movie"; if isSeries { endpoint = "tv" }
+
+	var creds bCredits; var akas bAkas; var kwds bKeywords; var omdbFill omdbFillData; var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/credits", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&creds); r.Body.Close() } }()
+	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/alternative_titles", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&akas); r.Body.Close() } }()
+	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("%s/%s/%s/keywords", apiFallback, endpoint, id)); e == nil { json.NewDecoder(r.Body).Decode(&kwds); r.Body.Close() } }()
+	go func() { defer wg.Done(); if r, e := http.Get(fmt.Sprintf("https://www.omdbapi.com/?i=%s&apikey=%s", id, OmdbApiKey)); e == nil { json.NewDecoder(r.Body).Decode(&omdbFill); r.Body.Close() } }()
+	wg.Wait()
+
+	var sb strings.Builder
+	var title, origTitle, dateStr, overview, poster, tagline string
+	var year, lastYear, runtime, seasons, episodes int
+	var vote float64; var vCount int; var typeStr = "Movie"
+	var dirs, writers, prods, stars, cast, genres []string
+	var trailer *bTrailer
+
+	if isSeries {
+		title = tDetail.Name; origTitle = tDetail.OriginalName; dateStr = tDetail.FirstAirDate; year = parseYear(dateStr); lastYear = parseYear(tDetail.LastAirDate); overview = tDetail.Overview; poster = tDetail.PosterPath; if len(tDetail.EpisodeRunTime) > 0 { runtime = tDetail.EpisodeRunTime[0] }
+		vote = tDetail.VoteAverage; vCount = tDetail.VoteCount; seasons = tDetail.NumberOfSeasons; episodes = tDetail.NumberOfEpisodes; typeStr = "TV Series"; trailer = tDetail.Trailer
+		for _, g := range tDetail.Genres { genres = append(genres, g.Name) }
+	} else {
+		title = mDetail.Title; origTitle = mDetail.OriginalTitle; dateStr = mDetail.ReleaseDate; year = parseYear(dateStr); overview = mDetail.Overview; poster = mDetail.PosterPath; tagline = mDetail.Tagline; runtime = mDetail.Runtime
+		vote = mDetail.VoteAverage; vCount = mDetail.VoteCount; trailer = mDetail.Trailer
+		for _, g := range mDetail.Genres { genres = append(genres, g.Name) }
+	}
+
+	yearStr := ""
+	if isSeries {
+		if lastYear > year { yearStr = fmt.Sprintf("[%d-%d]", year, lastYear) } else if lastYear == 0 && year > 0 { yearStr = fmt.Sprintf("[%d-Present]", year) } else if year > 0 { yearStr = fmt.Sprintf("[%d]", year) }
+	} else if year > 0 { yearStr = fmt.Sprintf("[%d]", year) }
+
+	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"https://imdb.com/title/%s\">IMDb Link</a>\n", typeStr, title, yearStr, id))
+	if origTitle != "" && origTitle != title { sb.WriteString(fmt.Sprintf("<i>(Original Title: %s)</i>\n", origTitle)) }
+
+	akaStr := ""
+	if len(akas.Titles) > 0 {
+		for _, a := range akas.Titles { if (a.Iso3166_1 == "US" || a.Iso3166_1 == "IN") && a.Title != title { akaStr = a.Title; break } }
+		if akaStr == "" && akas.Titles[0].Title != title { akaStr = akas.Titles[0].Title }
+	}
+	if akaStr != "" { sb.WriteString(fmt.Sprintf("<i>(AKA %s)</i>\n", akaStr)) }
+
+	if isSeries && seasons > 0 { sb.WriteString(fmt.Sprintf("<b>%d Seasons (%d Episodes)</b>\n", seasons, episodes)) } else if isSeries && omdbFill.TotalSeasons != "" && omdbFill.TotalSeasons != notAvailable { sb.WriteString(fmt.Sprintf("<b>%s Seasons</b>\n", omdbFill.TotalSeasons)) }
+
+	if runtime > 0 { dur := fmt.Sprintf("%dh %dm", runtime/60, runtime%60); if isSeries { dur += "/Episode" }; sb.WriteString(fmt.Sprintf("<i>Duration: </i>%s\n", dur)) }
+
+	if dateStr != "" { 
+		if p, err := time.Parse("2006-01-02", dateStr); err == nil { dateStr = p.Format("02 January 2006") }
+		flag := ""
+		if isSeries && len(tDetail.OriginCountry) > 0 { flag = getFlag(tDetail.OriginCountry[0]) } else if !isSeries && len(mDetail.ProductionCountries) > 0 { flag = getFlag(mDetail.ProductionCountries[0].Iso3166_1) } else if omdbFill.Country != "" && omdbFill.Country != notAvailable { flag = getFlag(omdbFill.Country) }
+		if flag != "" { dateStr += fmt.Sprintf(" (%s)", flag) }
+		if isSeries { dateStr += " - First Episode" }
+		sb.WriteString(fmt.Sprintf("<i>Release Date: </i>%s\n", dateStr)) 
+	}
+
+	sb.WriteString("<blockquote>")
+	if vote > 0 { sb.WriteString(fmt.Sprintf("<i>Rating ⭐️ </i><b>%.1f / 10</b> (from %d votes)\n", vote, vCount)) }
+
+	var gEmojiMap = map[string]string{ "Action": "💥", "Adventure": "🗺️", "Sci-Fi": "🚀", "Science Fiction": "🚀", "Comedy": "🤣", "Drama": "🎭", "Romance": "🌹", "Thriller": "🔪", "Horror": "👻", "Fantasy": "✨", "Mystery": "❓", "Music": "🎶" }
+	if len(genres) > 0 {
+		var gs []string
+		for _, g := range genres {
+			emoji := "- "
+			if e, ok := gEmojiMap[g]; ok { emoji = e + " " }
+			gs = append(gs, fmt.Sprintf("%s#%s", emoji, strings.ReplaceAll(g, " ", "_")))
+		}
+		sb.WriteString(fmt.Sprintf("<i>Genres: </i>%s\n", strings.Join(gs, " ")))
+	}
+
+	var themes []string
+	for i, k := range kwds.Keywords {
+		if i >= 6 { break }
+		themes = append(themes, "#" + strings.ReplaceAll(strings.Title(k.Name), " ", "_"))
+	}
+	if len(themes) > 0 { sb.WriteString(fmt.Sprintf("<i>Themes: </i>%s\n", strings.Join(themes, " "))) }
+
+	var lgs, cgs []string
+	if isSeries {
+		for _, l := range tDetail.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
+		for _, c := range tDetail.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
+		if len(cgs) == 0 { for _, c := range tDetail.OriginCountry { f := getFlag(c); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, c)) } }
+	} else {
+		for _, l := range mDetail.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
+		for _, c := range mDetail.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
+	}
+	if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
+	sb.WriteString("</blockquote>\n\n")
+
+	if tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", tagline)) }
+	if overview != "" { sb.WriteString(fmt.Sprintf("<blockquote><b>Story Line: </b><i>%s</i></blockquote>\n\n", overview)) }
+
+	for _, c := range creds.Crew {
+		if c.Job == "Director" || (isSeries && (c.Job == "Executive Producer" || c.Job == "Creator")) { if len(dirs) < 3 { dirs = append(dirs, link(c.Name, c.ID)) } }
+		if c.Department == "Writing" || c.Job == "Writer" || c.Job == "Screenplay" { if len(writers) < 3 { writers = append(writers, link(c.Name, c.ID)) } }
+		if c.Job == "Producer" { if len(prods) < 3 { prods = append(prods, link(c.Name, c.ID)) } }
+	}
+	for i, c := range creds.Cast {
+		if i < 4 { stars = append(stars, link(c.Name, c.ID)) }
+		if i >= 4 && i < topCastLimit+4 { cast = append(cast, link(c.Name, c.ID)) }
+	}
+
+	sb.WriteString("<blockquote>")
+	if len(dirs) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Directors:</b></i> %s\n", strings.Join(dirs, ", "))) }
+	if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", strings.Join(writers, ", "))) }
+	if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
+	if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
+	if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s\n", strings.Join(cast, ", "))) }
+	sb.WriteString("</blockquote>\n\n")
+
+	sb.WriteString("<blockquote>")
+	if omdbFill.Awards != "" && omdbFill.Awards != notAvailable {
+		sb.WriteString(fmt.Sprintf("<b>Awards: </b><a href=\"https://imdb.com/title/%s/awards\">%s</a>\n", id, omdbFill.Awards))
+	}
+	sb.WriteString(fmt.Sprintf("<b>OTT Info: </b><a href=\"https://www.justwatch.com/in/search?q=%s\">Find on JustWatch</a></blockquote>", url.QueryEscape(title)))
+
+	if enableTelegraph {
+		var nodes []tgNode
+		nodes = append(nodes, tgNode{Tag: "h3", Children: []any{fmt.Sprintf("%s %s", title, yearStr)}})
+		if poster != "" { nodes = append(nodes, tgNode{Tag: "figure", Children: []any{tgNode{Tag: "img", Attrs: &tgAttrs{Src: "https://image.tmdb.org/t/p/original" + poster}}}}) }
+		nodes = append(nodes, makeHeader("Info"), makeRow("Type", typeStr))
+		nodes = append(nodes, makeRow("Plot", overview))
+		if len(creds.Cast) > 0 {
+			nodes = append(nodes, makeHeader("Full Cast"))
+			var castList []string
+			for _, c := range creds.Cast {
+				role := ""
+				if c.Character != "" { role = " as " + c.Character }
+				castList = append(castList, c.Name+role)
+			}
+			nodes = append(nodes, tgNode{Tag: "p", Children: []any{strings.Join(castList, ", ")}})
+		}
+		page := createTelegraphPage(title+" Details", nodes)
+		sb.WriteString(fmt.Sprintf("\n\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", id))
+		if page != "" { sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Full Details</a>", page)) }
+	} else {
+		sb.WriteString(fmt.Sprintf("\n\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", id))
+	}
+
+	trailerLink := ""
+	if trailer != nil && trailer.URL != "" { trailerLink = trailer.URL }
+
+	vidURL := ""
+	if trailer != nil && trailer.Playback != nil {
+		for _, q := range []string{"1080p", "720p", "AUTO", "480p", "SD", "240p"} {
+			if v, ok := trailer.Playback[q]; ok && v != "" { vidURL = v; break }
+		}
+	}
+	
+	pURL := omdbBanner
+	if vidURL != "" { pURL = vidURL } else if poster != "" { pURL = "https://image.tmdb.org/t/p/original" + poster }
+	
+	posterURL := omdbBanner
+	if poster != "" { posterURL = "https://image.tmdb.org/t/p/original" + poster }
+
+	if trailerLink != "" { 
+		sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Trailer</a>", trailerLink)) 
+		sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Download Poster</a>", posterURL))
+	} else {
+		sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Download Poster</a>", posterURL))
+	}
+
+	return pURL, sb.String(), buttons, nil
 }
