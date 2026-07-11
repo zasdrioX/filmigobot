@@ -212,9 +212,20 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 		sb.WriteString(fmt.Sprintf("<i>Release Date: </i>%s\n", dateStr)) 
 	}
 
-	sb.WriteString("<blockquote>")
-	if vote > 0 { sb.WriteString(fmt.Sprintf("<i>Rating ⭐️ </i><b>%.1f / 10</b> (from %d votes)\n", vote, vCount)) }
+	// 1. Rating + Metascore + Rated explicitly placed outside the blockquote
+	ratingLine := ""
+	if vote > 0 { ratingLine += fmt.Sprintf("Rating ⭐️ %.1f / 10 (from %d votes)", vote, vCount) }
+	if omdbFill.Metascore != "" && omdbFill.Metascore != notAvailable {
+		if ratingLine != "" { ratingLine += " | " }
+		ratingLine += fmt.Sprintf("Ⓜ️ %s/100", omdbFill.Metascore)
+	}
+	if omdbFill.Rated != "" && omdbFill.Rated != notAvailable && omdbFill.Rated != "Not Rated" {
+		if ratingLine != "" { ratingLine += " | " }
+		ratingLine += fmt.Sprintf("%s", omdbFill.Rated)
+	}
+	if ratingLine != "" { sb.WriteString(ratingLine + "\n") }
 
+	sb.WriteString("<blockquote>")
 	var gEmojiMap = map[string]string{ "Action": "💥", "Adventure": "🗺️", "Sci-Fi": "🚀", "Science Fiction": "🚀", "Comedy": "🤣", "Drama": "🎭", "Romance": "🌹", "Thriller": "🔪", "Horror": "👻", "Fantasy": "✨", "Mystery": "❓", "Music": "🎶" }
 	if len(genres) > 0 {
 		var gs []string
@@ -242,11 +253,13 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 		for _, l := range mDetail.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
 		for _, c := range mDetail.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
 	}
-	if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
-	sb.WriteString("</blockquote>\n")
+	if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
+	
+	// Generates 1 blank line before Tagline or Story Line
+	sb.WriteString("</blockquote>\n\n")
 
-	if tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n", tagline)) }
-	// Notice the double newline below guarantees exactly one blank line before Directors
+	// 2. Exact spacing for Tagline & Story Line
+	if tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", tagline)) }
 	if overview != "" { sb.WriteString(fmt.Sprintf("<blockquote><b>Story Line: </b><i>%s</i></blockquote>\n\n", overview)) }
 
 	for _, c := range creds.Crew {
@@ -264,7 +277,9 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 	if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", strings.Join(writers, ", "))) }
 	if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
 	if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
-	if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s\n", strings.Join(cast, ", "))) }
+	
+	// 3. Prevent extra newline trailing the Top Cast, ensuring exactly 1 blank line before Awards
+	if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
 	sb.WriteString("</blockquote>\n\n")
 
 	if omdbFill.Awards != "" && omdbFill.Awards != notAvailable {
