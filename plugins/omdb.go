@@ -290,14 +290,12 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 	sb.WriteString(fmt.Sprintf("<b>OTT Info: </b><a href=\"https://www.justwatch.com/in/search?q=%s\">Find on JustWatch</a>\n", url.QueryEscape(title)))
 
 	// IMAX-Level IMDb Poster fetch
-	imdbPoster := omdbFill.Poster
 	dl := omdbBanner
-	if imdbPoster != "" && imdbPoster != notAvailable {
-		if strings.Contains(imdbPoster, "._V1_") {
-			base := strings.Split(imdbPoster, "._V1_")[0]
-			dl = base + "._V1_FMjpg_UX3000_.jpg"
-		} else { dl = imdbPoster }
-	} else if poster != "" { dl = "https://image.tmdb.org/t/p/original" + poster }
+	if poster != "" {
+		if strings.HasPrefix(poster, "http") { dl = poster } else { dl = "https://image.tmdb.org/t/p/original" + poster }
+	} else if omdbFill.Poster != "" && omdbFill.Poster != notAvailable {
+		dl = omdbFill.Poster
+	}
 
 	if enableTelegraph {
 		var nodes []tgNode
