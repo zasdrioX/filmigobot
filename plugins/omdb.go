@@ -260,7 +260,9 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 
 	// 2. Exact spacing for Tagline & Story Line
 	if tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", tagline)) }
-	if overview != "" { sb.WriteString(fmt.Sprintf("<blockquote><b>Story Line: </b><i>%s</i></blockquote>\n\n", overview)) }
+	shortOverview := overview
+	if rs := []rune(overview); len(rs) > 800 { shortOverview = string(rs[:797]) + "..." }
+	if overview != "" { sb.WriteString(fmt.Sprintf("<blockquote><b>Story Line: </b><i>%s</i></blockquote>\n\n", shortOverview)) }
 
 	for _, c := range creds.Crew {
 		if c.Job == "Director" || (isSeries && (c.Job == "Executive Producer" || c.Job == "Creator")) { if len(dirs) < 3 { dirs = append(dirs, link(c.Name, c.ID)) } }
