@@ -265,7 +265,7 @@ var lgs, cgs []string
 for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgs = append(lgs, "#"+strings.ReplaceAll(langName, " ", "_")) } }
 for _, c := range t.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
 if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
-sb.WriteString("</blockquote>\n\n")
+sb.WriteString("</blockquote>\n")
 
 if t.Tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline)) }
 
@@ -290,7 +290,7 @@ if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", 
 if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
 if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
 if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
-sb.WriteString("</blockquote>\n\n")
+sb.WriteString("</blockquote>\n")
 
 if omdbFill.Awards != "" && omdbFill.Awards != notAvailable {
 sb.WriteString(fmt.Sprintf("<b>Awards: </b><a href=\"https://imdb.com/title/%s/awards\">%s</a>\n", imdbID, omdbFill.Awards))
