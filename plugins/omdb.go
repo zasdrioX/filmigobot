@@ -379,7 +379,7 @@ if t.Revenue > 0 { nodes = append(nodes, makeRow("Worldwide Gross", fmt.Sprintf(
 var pComps []string; for _, pc := range t.ProductionCompanies { pComps = append(pComps, pc.Name) }
 if len(pComps) > 0 { nodes = append(nodes, makeRow("Production Companies", strings.Join(pComps, ", "))) }
 var nets []string; for _, n := range t.Networks { nets = append(nets, n.Name) }
-if len(nets) > 0 { nodes = append(nets, makeRow("Networks", strings.Join(nets, ", "))) }
+if len(nets) > 0 { nodes = append(nodes, makeRow("Networks", strings.Join(nets, ", "))) }
 
 var lgsTel []string; for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgsTel = append(lgsTel, langName) } }
 if len(lgsTel) > 0 { nodes = append(nodes, makeRow("Spoken Languages", strings.Join(lgsTel, ", "))) }
