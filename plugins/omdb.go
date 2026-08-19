@@ -12,6 +12,7 @@ import (
 "net/url"
 "strconv"
 "strings"
+"sync"
 "time"
 
 "github.com/Jisin0/filmigo/omdb"
@@ -87,7 +88,7 @@ type tmdbFindRes struct {
 MovieResults []struct{ ID int `json:"id"` } `json:"movie_results"`; TvResults []struct{ ID int `json:"id"` } `json:"tv_results"`
 }
 type tmdbDetail struct {
-ID int `json:"id"`; Title string `json:"title"`; Name string `json:"name"`; OriginalTitle string `json:"original_title"`; OriginalName string `json:"original_name"`; Overview string `json:"overview"`; Tagline string `json:"tagline"`; ReleaseDate string `json:"release_date"`; FirstAirDate string `json:"first_air_date"`; LastAirDate string `json:"last_air_date"`; Runtime int `json:"runtime"`; EpisodeRunTime []int `json:"episode_run_time"`; NumberOfSeasons int `json:"number_of_seasons"`; NumberOfEpisodes int `json:"number_of_episodes"`; VoteAverage float64 `json:"vote_average"`; VoteCount int `json:"vote_count"`; Popularity float64 `json:"popularity"`; Genres []struct{ Name string `json:"name"` } `json:"genres"`; PosterPath string `json:"poster_path"`; SpokenLanguages []struct{ Name string `json:"name"` } `json:"spoken_languages"`; ProductionCountries []struct{ Iso3166_1 string `json:"iso_3166_1"`; Name string `json:"name"` } `json:"production_countries"`; ProductionCompanies []struct{ Name string `json:"name"` } `json:"production_companies"`; Networks []struct{ Name string `json:"name"` } `json:"networks"`; Budget int `json:"budget"`; Revenue int `json:"revenue"`; Status string `json:"status"`
+ID int `json:"id"`; Title string `json:"title"`; Name string `json:"name"`; OriginalTitle string `json:"original_title"`; OriginalName string `json:"original_name"`; Overview string `json:"overview"`; Tagline string `json:"tagline"`; ReleaseDate string `json:"release_date"`; FirstAirDate string `json:"first_air_date"`; LastAirDate string `json:"last_air_date"`; Runtime int `json:"runtime"`; EpisodeRunTime []int `json:"episode_run_time"`; NumberOfSeasons int `json:"number_of_seasons"`; NumberOfEpisodes int `json:"number_of_episodes"`; VoteAverage float64 `json:"vote_average"`; VoteCount int `json:"vote_count"`; Popularity float64 `json:"popularity"`; Genres []struct{ Name string `json:"name"` } `json:"genres"`; PosterPath string `json:"poster_path"`; SpokenLanguages []struct{ EnglishName string `json:"english_name"`; Name string `json:"name"` } `json:"spoken_languages"`; ProductionCountries []struct{ Iso3166_1 string `json:"iso_3166_1"`; Name string `json:"name"` } `json:"production_countries"`; ProductionCompanies []struct{ Name string `json:"name"` } `json:"production_companies"`; Networks []struct{ Name string `json:"name"` } `json:"networks"`; Budget int `json:"budget"`; Revenue int `json:"revenue"`; Status string `json:"status"`
 Credits struct { Cast []struct{ ID int `json:"id"`; Name string `json:"name"`; Character string `json:"character"` } `json:"cast"`; Crew []struct{ ID int `json:"id"`; Name string `json:"name"`; Job string `json:"job"`; Department string `json:"department"` } `json:"crew"` } `json:"credits"`
 Keywords struct { Keywords []struct{ Name string `json:"name"` } `json:"keywords"`; Results []struct{ Name string `json:"name"` } `json:"results"` } `json:"keywords"`
 Videos struct { Results []struct{ Key string `json:"key"`; Site string `json:"site"`; Type string `json:"type"` } `json:"results"` } `json:"videos"`
@@ -161,7 +162,6 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 if progress != nil { go progress("<i>Fetching High Quality Details...</i>") }
 var buttons [][]gotgbot.InlineKeyboardButton
 
-// Clean prefixes
 id = strings.TrimPrefix(id, "open_")
 id = strings.TrimPrefix(id, "omdb_")
 
@@ -178,12 +178,11 @@ parts := strings.Split(id, "-"); mType = parts[0]; tmdbID = parts[1]
 } else if strings.Contains(id, "_") {
 parts := strings.Split(id, "_"); mType = parts[0]; tmdbID = parts[1]
 } else {
-// Test movie first, fallback to tv
 mType = "movie"; tmdbID = id
 if r, err := http.Get(fmt.Sprintf("https://api.themoviedb.org/3/movie/%s?api_key=%s", tmdbID, tmdbKey)); err == nil {
 defer r.Body.Close()
 var testDet tmdbDetail; json.NewDecoder(r.Body).Decode(&testDet)
-if testDet.Title == "" { mType = "tv" }
+if testDet.ID == 0 { mType = "tv" }
 }
 }
 
@@ -264,9 +263,9 @@ for i, k := range kws { if i >= 6 { break }; themes = append(themes, "#" + strin
 if len(themes) > 0 { sb.WriteString(fmt.Sprintf("<i>Themes: </i>%s\n", strings.Join(themes, " "))) }
 
 var lgs, cgs []string
-for _, l := range t.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
+for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgs = append(lgs, "#"+strings.ReplaceAll(langName, " ", "_")) } }
 for _, c := range t.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
-if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
+if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
 sb.WriteString("</blockquote>\n\n")
 
 if t.Tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline)) }
@@ -337,7 +336,7 @@ if len(pComps) > 0 { nodes = append(nodes, makeRow("Production Companies", strin
 var nets []string; for _, n := range t.Networks { nets = append(nets, n.Name) }
 if len(nets) > 0 { nodes = append(nodes, makeRow("Networks", strings.Join(nets, ", "))) }
 
-var lgsTel []string; for _, l := range t.SpokenLanguages { lgsTel = append(lgsTel, l.Name) }
+var lgsTel []string; for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgsTel = append(lgsTel, langName) } }
 if len(lgsTel) > 0 { nodes = append(nodes, makeRow("Spoken Languages", strings.Join(lgsTel, ", "))) }
 var cgsTel []string; for _, c := range t.ProductionCountries { cgsTel = append(cgsTel, c.Name) }
 if len(cgsTel) > 0 { nodes = append(nodes, makeRow("Production Countries", strings.Join(cgsTel, ", "))) }
