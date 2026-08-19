@@ -118,7 +118,7 @@ json.NewDecoder(r2.Body).Decode(&det)
 t := det.Title; if t == "" { t = det.Name }
 date := det.ReleaseDate; if date == "" { date = det.FirstAirDate }
 tag := "Movie"; if mType == "tv" { tag = "TV Series" }
-return []UniversalSearchResult{{ID: fmt.Sprintf("%s_%d", mType, id), Title: t, Year: parseYear(date), Poster: det.PosterPath, Type: tag, Rating: det.VoteAverage}}, nil
+return []UniversalSearchResult{{ID: fmt.Sprintf("%s-%d", mType, id), Title: t, Year: parseYear(date), Poster: det.PosterPath, Type: tag, Rating: det.VoteAverage}}, nil
 }
 }
 }
@@ -134,7 +134,7 @@ if i.MediaType == "person" { continue }
 title := i.Title; if title == "" { title = i.Name }
 date := i.ReleaseDate; if date == "" { date = i.FirstAirDate }
 typeTag := "Movie"; if i.MediaType == "tv" { typeTag = "TV Series" }
-results = append(results, UniversalSearchResult{ID: fmt.Sprintf("%s_%d", i.MediaType, i.ID), Title: title, Year: parseYear(date), Poster: i.PosterPath, Type: typeTag, Rating: i.VoteAverage})
+results = append(results, UniversalSearchResult{ID: fmt.Sprintf("%s-%d", i.MediaType, i.ID), Title: title, Year: parseYear(date), Poster: i.PosterPath, Type: typeTag, Rating: i.VoteAverage})
 }
 if len(results) == 0 { return nil, errors.New("no results") }
 return results, nil
@@ -160,6 +160,11 @@ return tgResults
 func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
 if progress != nil { go progress("<i>Fetching High Quality Details...</i>") }
 var buttons [][]gotgbot.InlineKeyboardButton
+
+// Clean prefixes
+id = strings.TrimPrefix(id, "open_")
+id = strings.TrimPrefix(id, "omdb_")
+
 var mType string; var tmdbID string
 
 if strings.HasPrefix(id, "tt") {
@@ -168,9 +173,19 @@ defer r.Body.Close()
 var d tmdbFindRes; json.NewDecoder(r.Body).Decode(&d)
 if len(d.MovieResults) > 0 { tmdbID = strconv.Itoa(d.MovieResults[0].ID); mType = "movie" } else if len(d.TvResults) > 0 { tmdbID = strconv.Itoa(d.TvResults[0].ID); mType = "tv" }
 }
+} else if strings.Contains(id, "-") {
+parts := strings.Split(id, "-"); mType = parts[0]; tmdbID = parts[1]
 } else if strings.Contains(id, "_") {
 parts := strings.Split(id, "_"); mType = parts[0]; tmdbID = parts[1]
-} else { mType = "movie"; tmdbID = id }
+} else {
+// Test movie first, fallback to tv
+mType = "movie"; tmdbID = id
+if r, err := http.Get(fmt.Sprintf("https://api.themoviedb.org/3/movie/%s?api_key=%s", tmdbID, tmdbKey)); err == nil {
+defer r.Body.Close()
+var testDet tmdbDetail; json.NewDecoder(r.Body).Decode(&testDet)
+if testDet.Title == "" { mType = "tv" }
+}
+}
 
 if tmdbID == "" { return "", "", buttons, errors.New("not found") }
 
@@ -251,10 +266,10 @@ if len(themes) > 0 { sb.WriteString(fmt.Sprintf("<i>Themes: </i>%s\n", strings.J
 var lgs, cgs []string
 for _, l := range t.SpokenLanguages { lgs = append(lgs, "#"+strings.ReplaceAll(l.Name, " ", "_")) }
 for _, c := range t.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
-if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
+if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
 sb.WriteString("</blockquote>\n\n")
 
-if t.Tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n", t.Tagline)) }
+if t.Tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline)) }
 
 shortOverview := t.Overview
 if rs := []rune(t.Overview); len(rs) > 800 { shortOverview = string(rs[:797]) + "..." }
@@ -276,7 +291,7 @@ if len(dirs) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Directors:</b></i> %s\n", s
 if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", strings.Join(writers, ", "))) }
 if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
 if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
-if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s\n", strings.Join(cast, ", "))) }
+if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
 sb.WriteString("</blockquote>\n\n")
 
 if omdbFill.Awards != "" && omdbFill.Awards != notAvailable {
