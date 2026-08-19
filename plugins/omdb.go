@@ -12,7 +12,6 @@ import (
 "net/url"
 "strconv"
 "strings"
-"sync"
 "time"
 
 "github.com/Jisin0/filmigo/omdb"
