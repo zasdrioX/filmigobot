@@ -93,7 +93,20 @@ Keywords struct { Keywords []struct{ Name string `json:"name"` } `json:"keywords
 Videos struct { Results []struct{ Key string `json:"key"`; Site string `json:"site"`; Type string `json:"type"` } `json:"results"` } `json:"videos"`
 ExternalIds struct { ImdbId string `json:"imdb_id"` } `json:"external_ids"`
 }
-type omdbFillData struct { Released string `json:"Released"`; Awards string `json:"Awards"`; TotalSeasons string `json:"totalSeasons"`; Country string `json:"Country"`; Poster string `json:"Poster"`; BoxOffice string `json:"BoxOffice"`; Rated string `json:"Rated"`; Metascore string `json:"Metascore"` }
+type omdbRating struct { Source string `json:"Source"`; Value string `json:"Value"` }
+type omdbFillData struct {
+Released     string       `json:"Released"`
+Awards       string       `json:"Awards"`
+TotalSeasons string       `json:"totalSeasons"`
+Country      string       `json:"Country"`
+Poster       string       `json:"Poster"`
+BoxOffice    string       `json:"BoxOffice"`
+Rated        string       `json:"Rated"`
+Metascore    string       `json:"Metascore"`
+ImdbRating   string       `json:"imdbRating"`
+ImdbVotes    string       `json:"imdbVotes"`
+Ratings      []omdbRating `json:"Ratings"`
+}
 
 func parseYear(d string) int { if len(d) >= 4 { y, _ := strconv.Atoi(d[:4]); return y }; return 0 }
 
@@ -236,12 +249,38 @@ if isSeries { dateStr += " - First Episode" }
 sb.WriteString(fmt.Sprintf("<i>Release Date: </i>%s\n", dateStr))
 }
 
+// 1. Official IMDb Rating and Votes (from OMDb)
 ratingLine := ""
-if t.VoteAverage > 0 { ratingLine += fmt.Sprintf("Rating ⭐️ %.1f / 10 (from %d votes)", t.VoteAverage, t.VoteCount) }
+if omdbFill.ImdbRating != "" && omdbFill.ImdbRating != notAvailable && omdbFill.ImdbRating != "0" {
+if omdbFill.ImdbVotes != "" && omdbFill.ImdbVotes != notAvailable {
+ratingLine += fmt.Sprintf("Rating ⭐️ %s / 10 (from %s votes)", omdbFill.ImdbRating, omdbFill.ImdbVotes)
+} else {
+ratingLine += fmt.Sprintf("Rating ⭐️ %s / 10", omdbFill.ImdbRating)
+}
+} else if t.VoteAverage > 0 {
+ratingLine += fmt.Sprintf("Rating ⭐️ %.1f / 10 (from %d votes)", t.VoteAverage, t.VoteCount)
+}
+
+// 2. Rotten Tomatoes Rating
+var rtScore string
+for _, rVal := range omdbFill.Ratings {
+if rVal.Source == "Rotten Tomatoes" {
+rtScore = rVal.Value
+break
+}
+}
+if rtScore != "" {
+if ratingLine != "" { ratingLine += " | " }
+ratingLine += fmt.Sprintf("🍅 %s", rtScore)
+}
+
+// 3. Metascore
 if omdbFill.Metascore != "" && omdbFill.Metascore != notAvailable {
 if ratingLine != "" { ratingLine += " | " }
 ratingLine += fmt.Sprintf("Ⓜ️ %s/100", omdbFill.Metascore)
 }
+
+// 4. Content Rating
 if omdbFill.Rated != "" && omdbFill.Rated != notAvailable && omdbFill.Rated != "Not Rated" {
 if ratingLine != "" { ratingLine += " | " }
 ratingLine += fmt.Sprintf("%s", omdbFill.Rated)
@@ -319,7 +358,12 @@ if runtime > 0 { nodes = append(nodes, makeRow("Runtime", fmt.Sprintf("%d minute
 if t.Status != "" { nodes = append(nodes, makeRow("Status", t.Status)) }
 
 nodes = append(nodes, makeHeader("Ratings & Popularity"))
+if omdbFill.ImdbRating != "" && omdbFill.ImdbRating != notAvailable {
+nodes = append(nodes, makeRow("IMDb Rating", fmt.Sprintf("%s/10 (from %s votes)", omdbFill.ImdbRating, omdbFill.ImdbVotes)))
+} else {
 nodes = append(nodes, makeRow("IMDb Rating", fmt.Sprintf("%.1f/10 (from %d votes)", t.VoteAverage, t.VoteCount)))
+}
+if rtScore != "" { nodes = append(nodes, makeRow("Rotten Tomatoes", rtScore)) }
 if omdbFill.Metascore != "" && omdbFill.Metascore != notAvailable { nodes = append(nodes, makeRow("Metascore", omdbFill.Metascore)) }
 if t.Popularity > 0 { nodes = append(nodes, makeRow("Popularity Score", fmt.Sprintf("%.2f", t.Popularity))) }
 
@@ -335,7 +379,7 @@ if t.Revenue > 0 { nodes = append(nodes, makeRow("Worldwide Gross", fmt.Sprintf(
 var pComps []string; for _, pc := range t.ProductionCompanies { pComps = append(pComps, pc.Name) }
 if len(pComps) > 0 { nodes = append(nodes, makeRow("Production Companies", strings.Join(pComps, ", "))) }
 var nets []string; for _, n := range t.Networks { nets = append(nets, n.Name) }
-if len(nets) > 0 { nodes = append(nodes, makeRow("Networks", strings.Join(nets, ", "))) }
+if len(nets) > 0 { nodes = append(nets, makeRow("Networks", strings.Join(nets, ", "))) }
 
 var lgsTel []string; for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgsTel = append(lgsTel, langName) } }
 if len(lgsTel) > 0 { nodes = append(nodes, makeRow("Spoken Languages", strings.Join(lgsTel, ", "))) }
