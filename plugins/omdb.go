@@ -248,24 +248,25 @@ ratingLine += fmt.Sprintf("%s", omdbFill.Rated)
 }
 if ratingLine != "" { sb.WriteString(ratingLine + "\n") }
 
-sb.WriteString("<blockquote>")
+var bq1 []string
 var gEmojiMap = map[string]string{ "Action": "💥", "Adventure": "🗺️", "Sci-Fi": "🚀", "Science Fiction": "🚀", "Comedy": "🤣", "Drama": "🎭", "Romance": "🌹", "Thriller": "🔪", "Horror": "👻", "Fantasy": "✨", "Mystery": "❓", "Music": "🎶" }
 if len(t.Genres) > 0 {
 var gs []string
 for _, g := range t.Genres { emoji := "- "; if e, ok := gEmojiMap[g.Name]; ok { emoji = e + " " }; gs = append(gs, fmt.Sprintf("%s#%s", emoji, strings.ReplaceAll(g.Name, " ", "_"))) }
-sb.WriteString(fmt.Sprintf("<i>Genres: </i>%s\n", strings.Join(gs, " ")))
+bq1 = append(bq1, fmt.Sprintf("<i>Genres: </i>%s", strings.Join(gs, " ")))
 }
 
 var themes []string
 kws := t.Keywords.Keywords; if len(kws) == 0 { kws = t.Keywords.Results }
 for i, k := range kws { if i >= 6 { break }; themes = append(themes, "#" + strings.ReplaceAll(strings.Title(k.Name), " ", "_")) }
-if len(themes) > 0 { sb.WriteString(fmt.Sprintf("<i>Themes: </i>%s\n", strings.Join(themes, " "))) }
+if len(themes) > 0 { bq1 = append(bq1, fmt.Sprintf("<i>Themes: </i>%s", strings.Join(themes, " "))) }
 
 var lgs, cgs []string
 for _, l := range t.SpokenLanguages { langName := l.EnglishName; if langName == "" { langName = l.Name }; if langName != "" { lgs = append(lgs, "#"+strings.ReplaceAll(langName, " ", "_")) } }
 for _, c := range t.ProductionCountries { f := getFlag(c.Iso3166_1); if f != "" { f += " " }; cgs = append(cgs, fmt.Sprintf("%s#%s", f, strings.ReplaceAll(c.Name, " ", "_"))) }
-if len(lgs) > 0 || len(cgs) > 0 { sb.WriteString(fmt.Sprintf("<i>Language (Country): </i>%s (%s)\n", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
-sb.WriteString("</blockquote>\n")
+if len(lgs) > 0 || len(cgs) > 0 { bq1 = append(bq1, fmt.Sprintf("<i>Language (Country): </i>%s (%s)", strings.Join(lgs, " "), strings.Join(cgs, " "))) }
+
+if len(bq1) > 0 { sb.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>\n\n", strings.Join(bq1, "\n"))) }
 
 if t.Tagline != "" { sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline)) }
 
@@ -284,13 +285,14 @@ if i < 4 { stars = append(stars, link(c.Name, c.ID)) }
 if i >= 4 && i < topCastLimit+4 { cast = append(cast, link(c.Name, c.ID)) }
 }
 
-sb.WriteString("<blockquote>")
-if len(dirs) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Directors:</b></i> %s\n", strings.Join(dirs, ", "))) }
-if len(writers) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Writers:</b></i> %s\n", strings.Join(writers, ", "))) }
-if len(prods) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Producers:</b></i> %s\n", strings.Join(prods, ", "))) }
-if len(stars) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Stars:</b></i> %s\n", strings.Join(stars, ", "))) }
-if len(cast) > 0 { sb.WriteString(fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
-sb.WriteString("</blockquote>\n")
+var bq3 []string
+if len(dirs) > 0 { bq3 = append(bq3, fmt.Sprintf("<i><b>Directors:</b></i> %s", strings.Join(dirs, ", "))) }
+if len(writers) > 0 { bq3 = append(bq3, fmt.Sprintf("<i><b>Writers:</b></i> %s", strings.Join(writers, ", "))) }
+if len(prods) > 0 { bq3 = append(bq3, fmt.Sprintf("<i><b>Producers:</b></i> %s", strings.Join(prods, ", "))) }
+if len(stars) > 0 { bq3 = append(bq3, fmt.Sprintf("<i><b>Stars:</b></i> %s", strings.Join(stars, ", "))) }
+if len(cast) > 0 { bq3 = append(bq3, fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", "))) }
+
+if len(bq3) > 0 { sb.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>\n\n", strings.Join(bq3, "\n"))) }
 
 if omdbFill.Awards != "" && omdbFill.Awards != notAvailable {
 sb.WriteString(fmt.Sprintf("<b>Awards: </b><a href=\"https://imdb.com/title/%s/awards\">%s</a>\n", imdbID, omdbFill.Awards))
