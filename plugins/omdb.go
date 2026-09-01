@@ -162,50 +162,48 @@ type imdbGqlSearchRes struct {
 	} `json:"data"`
 }
 
+type imdbPerson struct {
+	Name   string `json:"name"`
+	ImdbID string `json:"imdbId"`
+}
+
 // --- PYTHON IMDBINFO STRUCT ---
 type pythonImdbRes struct {
-	ImdbID           string   `json:"imdbId"`
-	Title            string   `json:"title"`
-	TitleAkas        []string `json:"title_akas"`
-	Kind             string   `json:"kind"`
-	CoverUrl         string   `json:"cover_url"`
-	Plot             string   `json:"plot"`
-	ReleaseDate      string   `json:"release_date"`
-	LanguagesText    []string `json:"languages_text"`
-	Mpaa             string   `json:"mpaa"`
-	Year             int      `json:"year"`
-	Duration         int      `json:"duration"`
-	Countries        []string `json:"countries"`
-	Rating           float64  `json:"rating"`
-	MetacriticRating int      `json:"metacritic_rating"`
-	Votes            int      `json:"votes"`
+	ImdbID           string       `json:"imdbId"`
+	Title            string       `json:"title"`
+	TitleAkas        []string     `json:"title_akas"`
+	Kind             string       `json:"kind"`
+	CoverUrl         string       `json:"cover_url"`
+	Plot             string       `json:"plot"`
+	ReleaseDate      string       `json:"release_date"`
+	LanguagesText    []string     `json:"languages_text"`
+	Mpaa             string       `json:"mpaa"`
+	Year             int          `json:"year"`
+	YearEnd          *int         `json:"year_end"`
+	Duration         int          `json:"duration"`
+	Countries        []string     `json:"countries"`
+	Rating           float64      `json:"rating"`
+	MetacriticRating int          `json:"metacritic_rating"`
+	Votes            int          `json:"votes"`
 	Awards           struct {
 		Wins        int `json:"wins"`
 		Nominations int `json:"nominations"`
 	} `json:"awards"`
-	Trailers          []string `json:"trailers"`
-	Genres            []string `json:"genres"`
-	StorylineKeywords []string `json:"storyline_keywords"`
-	WorldwideGross    string   `json:"worldwide_gross"`
-	ProductionBudget  string   `json:"production_budget"`
-	Directors         []struct {
-		Name   string `json:"name"`
-		ImdbID string `json:"imdbId"`
-	} `json:"directors"`
-	Writer []struct {
-		Name   string `json:"name"`
-		ImdbID string `json:"imdbId"`
-	} `json:"writer"`
-	Producer []struct {
-		Name   string `json:"name"`
-		ImdbID string `json:"imdbId"`
-	} `json:"producer"`
-	Categories struct {
+	Trailers          []string     `json:"trailers"`
+	Genres            []string     `json:"genres"`
+	StorylineKeywords []string     `json:"storyline_keywords"`
+	WorldwideGross    string       `json:"worldwide_gross"`
+	ProductionBudget  string       `json:"production_budget"`
+	Directors         []imdbPerson `json:"directors"`
+	Stars             []imdbPerson `json:"stars"`
+	Categories        struct {
 		Cast []struct {
 			Name       string   `json:"name"`
 			ImdbID     string   `json:"imdbId"`
 			Characters []string `json:"characters"`
 		} `json:"cast"`
+		Writer   []imdbPerson `json:"writer"`
+		Producer []imdbPerson `json:"producer"`
 	} `json:"categories"`
 }
 
@@ -544,7 +542,6 @@ except Exception as e:
 		return "", "", buttons, errors.New("python bridge parse failed")
 	}
 
-	// Fetch Complementary TMDB Data for Taglines, Seasons & Alternate Titles
 	var t tmdbDetail
 	if tmdbID != "" {
 		r, err := httpClient.Get(fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s", mType, tmdbID, tmdbKey))
@@ -555,41 +552,49 @@ except Exception as e:
 	}
 
 	var sb strings.Builder
+	isSeries := strings.Contains(strings.ToLower(p.Kind), "series") || strings.Contains(strings.ToLower(p.Kind), "tv") || mType == "tv"
 	typeStr := "Movie"
-	if strings.Contains(strings.ToLower(p.Kind), "series") || strings.Contains(strings.ToLower(p.Kind), "tv") {
+	if isSeries {
 		typeStr = "TV Series"
 	}
 
 	yearStr := ""
-	if p.Year > 0 {
+	if isSeries {
+		if p.YearEnd != nil && *p.YearEnd > p.Year {
+			yearStr = fmt.Sprintf("[%d-%d]", p.Year, *p.YearEnd)
+		} else if p.Year > 0 {
+			yearStr = fmt.Sprintf("[%d-Present]", p.Year)
+		}
+	} else if p.Year > 0 {
 		yearStr = fmt.Sprintf("[%d]", p.Year)
 	}
 
 	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"%s\">IMDb Link</a>\n", typeStr, p.Title, yearStr, "https://imdb.com/title/"+p.ImdbID))
 
-	// Alternate Titles (AKAs) Compiler
 	var akas []string
-	if t.OriginalTitle != "" && t.OriginalTitle != p.Title {
-		akas = append(akas, t.OriginalTitle)
-	} else if t.OriginalName != "" && t.OriginalName != p.Title {
-		akas = append(akas, t.OriginalName)
+	if len(p.TitleAkas) > 0 && p.TitleAkas[0] != p.Title {
+		akas = append(akas, p.TitleAkas[0])
 	}
-	if len(akas) == 0 && len(p.TitleAkas) > 0 {
-		if p.TitleAkas[0] != p.Title {
-			akas = append(akas, p.TitleAkas[0])
+	if len(akas) == 0 {
+		if t.OriginalTitle != "" && t.OriginalTitle != p.Title {
+			akas = append(akas, t.OriginalTitle)
+		} else if t.OriginalName != "" && t.OriginalName != p.Title {
+			akas = append(akas, t.OriginalName)
 		}
 	}
 	if len(akas) > 0 {
 		sb.WriteString(fmt.Sprintf("<i>(AKA %s)</i>\n", strings.Join(akas, ", ")))
 	}
 
-	// Series Specific Details
-	if typeStr == "TV Series" && t.NumberOfSeasons > 0 {
+	if isSeries && t.NumberOfSeasons > 0 {
 		sb.WriteString(fmt.Sprintf("<b>%d Seasons (%d Episodes)</b>\n", t.NumberOfSeasons, t.NumberOfEpisodes))
 	}
 
 	if p.Duration > 0 {
 		dur := fmt.Sprintf("%dh %dm", p.Duration/60, p.Duration%60)
+		if isSeries {
+			dur += "/Episode"
+		}
 		sb.WriteString(fmt.Sprintf("<i>Duration: </i>%s\n", dur))
 	}
 
@@ -604,6 +609,9 @@ except Exception as e:
 		}
 		if flag != "" {
 			dateStr += fmt.Sprintf(" (%s)", flag)
+		}
+		if isSeries {
+			dateStr += " - First Episode"
 		}
 		sb.WriteString(fmt.Sprintf("<i>Release Date: </i>%s\n", dateStr))
 	}
@@ -683,7 +691,6 @@ except Exception as e:
 		sb.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>\n\n", strings.Join(bq1, "\n")))
 	}
 
-	// Display the Tagline if available
 	if t.Tagline != "" {
 		sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline))
 	}
@@ -708,7 +715,7 @@ except Exception as e:
 	}
 
 	var writers []string
-	for _, w := range p.Writer {
+	for _, w := range p.Categories.Writer {
 		if len(writers) < 3 {
 			writers = append(writers, link(w.Name, w.ImdbID))
 		}
@@ -718,7 +725,7 @@ except Exception as e:
 	}
 
 	var prods []string
-	for _, pr := range p.Producer {
+	for _, pr := range p.Categories.Producer {
 		if len(prods) < 3 {
 			prods = append(prods, link(pr.Name, pr.ImdbID))
 		}
@@ -727,17 +734,29 @@ except Exception as e:
 		bq3 = append(bq3, fmt.Sprintf("<i><b>Producers:</b></i> %s", strings.Join(prods, ", ")))
 	}
 
-	var stars, cast []string
-	for i, c := range p.Categories.Cast {
-		if i < 4 {
-			stars = append(stars, link(c.Name, c.ImdbID))
+	var stars []string
+	if len(p.Stars) > 0 {
+		for i, s := range p.Stars {
+			if i < 4 {
+				stars = append(stars, link(s.Name, s.ImdbID))
+			}
 		}
-		if i >= 4 && i < topCastLimit+4 {
-			cast = append(cast, link(c.Name, c.ImdbID))
+	} else if len(p.Categories.Cast) > 0 {
+		for i, c := range p.Categories.Cast {
+			if i < 4 {
+				stars = append(stars, link(c.Name, c.ImdbID))
+			}
 		}
 	}
 	if len(stars) > 0 {
 		bq3 = append(bq3, fmt.Sprintf("<i><b>Stars:</b></i> %s", strings.Join(stars, ", ")))
+	}
+
+	var cast []string
+	for i, c := range p.Categories.Cast {
+		if i < topCastLimit {
+			cast = append(cast, link(c.Name, c.ImdbID))
+		}
 	}
 	if len(cast) > 0 {
 		bq3 = append(bq3, fmt.Sprintf("<i><b>Top Cast:</b></i> %s", strings.Join(cast, ", ")))
@@ -769,11 +788,11 @@ except Exception as e:
 
 		nodes = append(nodes, makeHeader("Overview"), tgNode{Tag: "p", Children: []any{p.Plot}})
 		nodes = append(nodes, makeHeader("General Information"), makeRow("Type", typeStr))
-		
+
 		if len(akas) > 0 {
 			nodes = append(nodes, makeRow("Alternate Titles", strings.Join(akas, ", ")))
 		}
-		if typeStr == "TV Series" && t.NumberOfSeasons > 0 {
+		if isSeries && t.NumberOfSeasons > 0 {
 			nodes = append(nodes, makeRow("Seasons", strconv.Itoa(t.NumberOfSeasons)))
 			nodes = append(nodes, makeRow("Episodes", strconv.Itoa(t.NumberOfEpisodes)))
 		}
@@ -816,7 +835,7 @@ except Exception as e:
 			sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Full Details</a>", page))
 		}
 	} else {
-		sb.WriteString(fmt.Sprintf("\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", p.ImdbID))
+		sb.WriteString(fmt.Sprintf("\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", displayImdb))
 	}
 
 	trailerLink := ""
@@ -1133,8 +1152,6 @@ func buildTMDBDetails(imdbID, mType, tmdbID string) (string, string, [][]gotgbot
 		}
 		if isSeries && t.NumberOfSeasons > 0 {
 			nodes = append(nodes, makeRow("Seasons", strconv.Itoa(t.NumberOfSeasons)))
-		}
-		if isSeries && t.NumberOfEpisodes > 0 {
 			nodes = append(nodes, makeRow("Episodes", strconv.Itoa(t.NumberOfEpisodes)))
 		}
 		if runtime > 0 {
