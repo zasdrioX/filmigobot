@@ -166,6 +166,7 @@ type imdbGqlSearchRes struct {
 type pythonImdbRes struct {
 	ImdbID           string   `json:"imdbId"`
 	Title            string   `json:"title"`
+	TitleAkas        []string `json:"title_akas"`
 	Kind             string   `json:"kind"`
 	CoverUrl         string   `json:"cover_url"`
 	Plot             string   `json:"plot"`
@@ -195,6 +196,10 @@ type pythonImdbRes struct {
 		Name   string `json:"name"`
 		ImdbID string `json:"imdbId"`
 	} `json:"writer"`
+	Producer []struct {
+		Name   string `json:"name"`
+		ImdbID string `json:"imdbId"`
+	} `json:"producer"`
 	Categories struct {
 		Cast []struct {
 			Name       string   `json:"name"`
@@ -202,11 +207,6 @@ type pythonImdbRes struct {
 			Characters []string `json:"characters"`
 		} `json:"cast"`
 	} `json:"categories"`
-	CompanyCredits struct {
-		Production []struct {
-			Name string `json:"name"`
-		} `json:"production"`
-	} `json:"company_credits"`
 }
 
 // --- TMDB & OMDB STRUCTS ---
@@ -508,7 +508,7 @@ func OMDbInlineSearch(query string) []gotgbot.InlineQueryResult {
 	return tgResults
 }
 
-func buildPythonDetails(imdbID string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
+func buildPythonDetails(imdbID, mType, tmdbID string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
 	var buttons [][]gotgbot.InlineKeyboardButton
 	pyScript := `
 import sys, json
@@ -536,22 +536,22 @@ except Exception as e:
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil || out.Len() == 0 {
-		fmt.Println("\n--- PYTHON BRIDGE EXECUTION FAILED ---")
-		fmt.Printf("Command used: %s\n", pyCmd)
-		fmt.Printf("IMDb ID: %s\n", imdbID)
-		fmt.Printf("Go Error: %v\n", err)
-		fmt.Printf("Python Stderr (Check missing packages/WAF blocks):\n%s\n", stderr.String())
-		fmt.Println("--------------------------------------\n")
 		return "", "", buttons, errors.New("python bridge failed")
 	}
 
 	var p pythonImdbRes
 	if err := json.Unmarshal(out.Bytes(), &p); err != nil || p.Title == "" {
-		fmt.Println("\n--- PYTHON BRIDGE PARSE FAILED ---")
-		fmt.Printf("Go Error: %v\n", err)
-		fmt.Printf("Raw Output from Python:\n%s\n", out.String())
-		fmt.Println("----------------------------------\n")
 		return "", "", buttons, errors.New("python bridge parse failed")
+	}
+
+	// Fetch Complementary TMDB Data for Taglines, Seasons & Alternate Titles
+	var t tmdbDetail
+	if tmdbID != "" {
+		r, err := httpClient.Get(fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s", mType, tmdbID, tmdbKey))
+		if err == nil {
+			defer r.Body.Close()
+			json.NewDecoder(r.Body).Decode(&t)
+		}
 	}
 
 	var sb strings.Builder
@@ -566,6 +566,27 @@ except Exception as e:
 	}
 
 	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"%s\">IMDb Link</a>\n", typeStr, p.Title, yearStr, "https://imdb.com/title/"+p.ImdbID))
+
+	// Alternate Titles (AKAs) Compiler
+	var akas []string
+	if t.OriginalTitle != "" && t.OriginalTitle != p.Title {
+		akas = append(akas, t.OriginalTitle)
+	} else if t.OriginalName != "" && t.OriginalName != p.Title {
+		akas = append(akas, t.OriginalName)
+	}
+	if len(akas) == 0 && len(p.TitleAkas) > 0 {
+		if p.TitleAkas[0] != p.Title {
+			akas = append(akas, p.TitleAkas[0])
+		}
+	}
+	if len(akas) > 0 {
+		sb.WriteString(fmt.Sprintf("<i>(AKA %s)</i>\n", strings.Join(akas, ", ")))
+	}
+
+	// Series Specific Details
+	if typeStr == "TV Series" && t.NumberOfSeasons > 0 {
+		sb.WriteString(fmt.Sprintf("<b>%d Seasons (%d Episodes)</b>\n", t.NumberOfSeasons, t.NumberOfEpisodes))
+	}
 
 	if p.Duration > 0 {
 		dur := fmt.Sprintf("%dh %dm", p.Duration/60, p.Duration%60)
@@ -662,6 +683,11 @@ except Exception as e:
 		sb.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>\n\n", strings.Join(bq1, "\n")))
 	}
 
+	// Display the Tagline if available
+	if t.Tagline != "" {
+		sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline))
+	}
+
 	shortOverview := p.Plot
 	if rs := []rune(p.Plot); len(rs) > 800 {
 		shortOverview = string(rs[:797]) + "..."
@@ -689,6 +715,16 @@ except Exception as e:
 	}
 	if len(writers) > 0 {
 		bq3 = append(bq3, fmt.Sprintf("<i><b>Writers:</b></i> %s", strings.Join(writers, ", ")))
+	}
+
+	var prods []string
+	for _, pr := range p.Producer {
+		if len(prods) < 3 {
+			prods = append(prods, link(pr.Name, pr.ImdbID))
+		}
+	}
+	if len(prods) > 0 {
+		bq3 = append(bq3, fmt.Sprintf("<i><b>Producers:</b></i> %s", strings.Join(prods, ", ")))
 	}
 
 	var stars, cast []string
@@ -727,9 +763,20 @@ except Exception as e:
 		if dl != omdbBanner {
 			nodes = append(nodes, tgNode{Tag: "figure", Children: []any{tgNode{Tag: "img", Attrs: &tgAttrs{Src: dl}}}})
 		}
+		if t.Tagline != "" {
+			nodes = append(nodes, tgNode{Tag: "blockquote", Children: []any{tgNode{Tag: "i", Children: []any{t.Tagline}}}})
+		}
 
 		nodes = append(nodes, makeHeader("Overview"), tgNode{Tag: "p", Children: []any{p.Plot}})
 		nodes = append(nodes, makeHeader("General Information"), makeRow("Type", typeStr))
+		
+		if len(akas) > 0 {
+			nodes = append(nodes, makeRow("Alternate Titles", strings.Join(akas, ", ")))
+		}
+		if typeStr == "TV Series" && t.NumberOfSeasons > 0 {
+			nodes = append(nodes, makeRow("Seasons", strconv.Itoa(t.NumberOfSeasons)))
+			nodes = append(nodes, makeRow("Episodes", strconv.Itoa(t.NumberOfEpisodes)))
+		}
 		nodes = append(nodes, makeRow("Runtime", fmt.Sprintf("%d minutes", p.Duration)))
 
 		nodes = append(nodes, makeHeader("Ratings"))
@@ -1283,7 +1330,7 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 	}
 
 	if imdbSearchID != "" {
-		dl, text, btns, err := buildPythonDetails(imdbSearchID)
+		dl, text, btns, err := buildPythonDetails(imdbSearchID, mType, tmdbID)
 		if err == nil && text != "" {
 			return dl, text, btns, nil
 		}
