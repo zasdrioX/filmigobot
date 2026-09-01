@@ -167,7 +167,6 @@ type imdbPerson struct {
 	ImdbID string `json:"imdbId"`
 }
 
-// --- PYTHON IMDBINFO STRUCT ---
 type pythonImdbRes struct {
 	ImdbID           string       `json:"imdbId"`
 	Title            string       `json:"title"`
@@ -207,7 +206,6 @@ type pythonImdbRes struct {
 	} `json:"categories"`
 }
 
-// --- TMDB & OMDB STRUCTS ---
 type tmdbMultiRes struct {
 	Results []struct {
 		ID           int     `json:"id"`
@@ -506,7 +504,7 @@ func OMDbInlineSearch(query string) []gotgbot.InlineQueryResult {
 	return tgResults
 }
 
-func buildPythonDetails(imdbID, mType, tmdbID string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
+func buildPythonDetails(imdbID string) (string, string, [][]gotgbot.InlineKeyboardButton, error) {
 	var buttons [][]gotgbot.InlineKeyboardButton
 	pyScript := `
 import sys, json
@@ -542,17 +540,8 @@ except Exception as e:
 		return "", "", buttons, errors.New("python bridge parse failed")
 	}
 
-	var t tmdbDetail
-	if tmdbID != "" {
-		r, err := httpClient.Get(fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s", mType, tmdbID, tmdbKey))
-		if err == nil {
-			defer r.Body.Close()
-			json.NewDecoder(r.Body).Decode(&t)
-		}
-	}
-
 	var sb strings.Builder
-	isSeries := strings.Contains(strings.ToLower(p.Kind), "series") || strings.Contains(strings.ToLower(p.Kind), "tv") || mType == "tv"
+	isSeries := strings.Contains(strings.ToLower(p.Kind), "series") || strings.Contains(strings.ToLower(p.Kind), "tv")
 	typeStr := "Movie"
 	if isSeries {
 		typeStr = "TV Series"
@@ -569,25 +558,18 @@ except Exception as e:
 		yearStr = fmt.Sprintf("[%d]", p.Year)
 	}
 
-	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"%s\">IMDb Link</a>\n", typeStr, p.Title, yearStr, "https://imdb.com/title/"+p.ImdbID))
+	displayImdb := p.ImdbID
+	if displayImdb == "" {
+		displayImdb = imdbID
+	}
+	sb.WriteString(fmt.Sprintf("<i>%s: </i><b>%s %s</b> | <a href=\"%s\">IMDb Link</a>\n", typeStr, p.Title, yearStr, "https://imdb.com/title/"+displayImdb))
 
 	var akas []string
 	if len(p.TitleAkas) > 0 && p.TitleAkas[0] != p.Title {
 		akas = append(akas, p.TitleAkas[0])
 	}
-	if len(akas) == 0 {
-		if t.OriginalTitle != "" && t.OriginalTitle != p.Title {
-			akas = append(akas, t.OriginalTitle)
-		} else if t.OriginalName != "" && t.OriginalName != p.Title {
-			akas = append(akas, t.OriginalName)
-		}
-	}
 	if len(akas) > 0 {
 		sb.WriteString(fmt.Sprintf("<i>(AKA %s)</i>\n", strings.Join(akas, ", ")))
-	}
-
-	if isSeries && t.NumberOfSeasons > 0 {
-		sb.WriteString(fmt.Sprintf("<b>%d Seasons (%d Episodes)</b>\n", t.NumberOfSeasons, t.NumberOfEpisodes))
 	}
 
 	if p.Duration > 0 {
@@ -691,10 +673,6 @@ except Exception as e:
 		sb.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>\n\n", strings.Join(bq1, "\n")))
 	}
 
-	if t.Tagline != "" {
-		sb.WriteString(fmt.Sprintf("<b>\"%s\"</b>\n\n", t.Tagline))
-	}
-
 	shortOverview := p.Plot
 	if rs := []rune(p.Plot); len(rs) > 800 {
 		shortOverview = string(rs[:797]) + "..."
@@ -767,7 +745,7 @@ except Exception as e:
 	}
 
 	if p.Awards.Wins > 0 || p.Awards.Nominations > 0 {
-		sb.WriteString(fmt.Sprintf("<b>Awards: </b><a href=\"https://imdb.com/title/%s/awards\">Won %d Awards. %d Nominations</a>\n", p.ImdbID, p.Awards.Wins, p.Awards.Nominations))
+		sb.WriteString(fmt.Sprintf("<b>Awards: </b><a href=\"https://imdb.com/title/%s/awards\">Won %d Awards. %d Nominations</a>\n", displayImdb, p.Awards.Wins, p.Awards.Nominations))
 	}
 	sb.WriteString(fmt.Sprintf("<b>OTT Info: </b><a href=\"https://www.justwatch.com/in/search?q=%s\">Find on JustWatch</a>\n", url.QueryEscape(p.Title)))
 
@@ -782,19 +760,12 @@ except Exception as e:
 		if dl != omdbBanner {
 			nodes = append(nodes, tgNode{Tag: "figure", Children: []any{tgNode{Tag: "img", Attrs: &tgAttrs{Src: dl}}}})
 		}
-		if t.Tagline != "" {
-			nodes = append(nodes, tgNode{Tag: "blockquote", Children: []any{tgNode{Tag: "i", Children: []any{t.Tagline}}}})
-		}
 
 		nodes = append(nodes, makeHeader("Overview"), tgNode{Tag: "p", Children: []any{p.Plot}})
 		nodes = append(nodes, makeHeader("General Information"), makeRow("Type", typeStr))
 
 		if len(akas) > 0 {
 			nodes = append(nodes, makeRow("Alternate Titles", strings.Join(akas, ", ")))
-		}
-		if isSeries && t.NumberOfSeasons > 0 {
-			nodes = append(nodes, makeRow("Seasons", strconv.Itoa(t.NumberOfSeasons)))
-			nodes = append(nodes, makeRow("Episodes", strconv.Itoa(t.NumberOfEpisodes)))
 		}
 		nodes = append(nodes, makeRow("Runtime", fmt.Sprintf("%d minutes", p.Duration)))
 
@@ -830,7 +801,7 @@ except Exception as e:
 		}
 
 		page := createTelegraphPage(p.Title+" Details", nodes)
-		sb.WriteString(fmt.Sprintf("\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", p.ImdbID))
+		sb.WriteString(fmt.Sprintf("\n<a href=\"https://imdb.com/title/%s\">Read More...</a>", displayImdb))
 		if page != "" {
 			sb.WriteString(fmt.Sprintf(" | <a href=\"%s\">Full Details</a>", page))
 		}
@@ -1347,7 +1318,7 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 	}
 
 	if imdbSearchID != "" {
-		dl, text, btns, err := buildPythonDetails(imdbSearchID, mType, tmdbID)
+		dl, text, btns, err := buildPythonDetails(imdbSearchID)
 		if err == nil && text != "" {
 			return dl, text, btns, nil
 		}
