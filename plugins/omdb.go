@@ -513,23 +513,44 @@ func buildPythonDetails(imdbID string) (string, string, [][]gotgbot.InlineKeyboa
 	pyScript := `
 import sys, json
 try:
-    from imdbinfo.services import get_movie
+    from imdbinfo.services import get_movie, _load_waf_cookies, request_handler
+    waf_cookies = _load_waf_cookies() or {}
+    if not waf_cookies:
+        try:
+            request_handler("https://www.imdb.com/")
+            waf_cookies = _load_waf_cookies() or {}
+        except Exception:
+            pass
     movie = get_movie(sys.argv[1])
     if movie:
         res = movie.model_dump() if hasattr(movie, "model_dump") else movie
         print(json.dumps(res, default=str))
 except Exception as e:
-    pass
+    import traceback
+    traceback.print_exc(file=sys.stderr)
 `
-	cmd := exec.Command(getPythonCmd(), "-c", pyScript, imdbID)
+	pyCmd := getPythonCmd()
+	cmd := exec.Command(pyCmd, "-c", pyScript, imdbID)
 	var out bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil || out.Len() == 0 {
+		fmt.Println("\n--- PYTHON BRIDGE EXECUTION FAILED ---")
+		fmt.Printf("Command used: %s\n", pyCmd)
+		fmt.Printf("IMDb ID: %s\n", imdbID)
+		fmt.Printf("Go Error: %v\n", err)
+		fmt.Printf("Python Stderr (Check missing packages/WAF blocks):\n%s\n", stderr.String())
+		fmt.Println("--------------------------------------\n")
 		return "", "", buttons, errors.New("python bridge failed")
 	}
 
 	var p pythonImdbRes
 	if err := json.Unmarshal(out.Bytes(), &p); err != nil || p.Title == "" {
+		fmt.Println("\n--- PYTHON BRIDGE PARSE FAILED ---")
+		fmt.Printf("Go Error: %v\n", err)
+		fmt.Printf("Raw Output from Python:\n%s\n", out.String())
+		fmt.Println("----------------------------------\n")
 		return "", "", buttons, errors.New("python bridge parse failed")
 	}
 
@@ -1250,10 +1271,8 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 		return "", "", nil, errors.New("not found")
 	}
 
-	// 1. Attempt Native Python Bridge for precise IMDb metadata
 	imdbSearchID := directImdbID
 	if imdbSearchID == "" && tmdbID != "" {
-		// If we only have TMDB ID, fallback immediately since python expects tt..
 		r, err := httpClient.Get(fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s", mType, tmdbID, tmdbKey))
 		if err == nil {
 			defer r.Body.Close()
@@ -1270,7 +1289,6 @@ func GetOMDbTitle(id string, progress func(string)) (string, string, [][]gotgbot
 		}
 	}
 
-	// 2. Fallback cleanly to TMDB if Python Bridge throws an error
 	return buildTMDBDetails(directImdbID, mType, tmdbID)
 }
 
